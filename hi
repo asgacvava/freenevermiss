@@ -1,0 +1,67 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+
+local TargetPlayer = nil
+local BringingActive = false
+local UpdateConnection = nil
+
+-- Fixing gui
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.ResetOnSpawn = false
+
+local Button = Instance.new("TextButton", ScreenGui)
+Button.Name = "BringButton"
+Button.Size = UDim2.new(0, 200, 0, 50)
+Button.Position = UDim2.new(0.5, -100, 0.1, 0)
+Button.Text = "Bring Random Player"
+Button.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
+Button.TextColor3 = Color3.new(1, 1, 1)
+Button.TextSize = 20
+Button.Draggable = true
+
+local function getRandomOtherPlayer()
+	local otherPlayers = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			table.insert(otherPlayers, player)
+		end
+	end
+	if #otherPlayers > 0 then
+		local randomIndex = math.random(1, #otherPlayers)
+		return otherPlayers[randomIndex]
+	else
+		return nil
+	end
+end
+
+local function bringPlayerInFront()
+	if TargetPlayer and TargetPlayer.Character and LocalPlayer.Character then
+		local targetHRP = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local myHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if targetHRP and myHRP then
+			targetHRP.CFrame = myHRP.CFrame * CFrame.new(0, 0, -5) -- Adjust offset as needed
+		end
+	end
+end
+
+Button.MouseButton1Click:Connect(function()
+	if not BringingActive then
+		TargetPlayer = getRandomOtherPlayer()
+		if TargetPlayer then
+			Button.Text = "Stop Bringing " .. TargetPlayer.Name
+			BringingActive = true
+			UpdateConnection = RunService.Heartbeat:Connect(bringPlayerInFront)
+		else
+			warn("No other players available to bring.")
+		end
+	else
+		if UpdateConnection then
+			UpdateConnection:Disconnect()
+			UpdateConnection = nil
+		end
+		Button.Text = "Bring Random Player"
+		BringingActive = false
+		TargetPlayer = nil
+	end
+end)
