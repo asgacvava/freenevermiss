@@ -1,67 +1,390 @@
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Attrixx/FreeScripts/main/YTUILib1.lua"))():init("Main Hub")
+
+local MainTab = Library:Tab("Main")
+local ESPTab = Library:Tab("ESP")
+local DesyncTab = Library:Tab("Desync")
+local MiscTab = Library:Tab("Misc")
+local SettingsTab = Library:Tab("Settings")
+
+local BringSection = MainTab:Section("DB SNIPER")
+local ESPSection = ESPTab:Section("ESP")
+local DesyncSection = DesyncTab:Section("Desync Options")
+local TriggerbotSection = MainTab:Section("Triggerbot")
+local MiscSection = MiscTab:Section("Emote while walking")
+local SettingsSection = SettingsTab:Section("General")
+
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local TargetPlayer = nil
-local BringingActive = false
-local UpdateConnection = nil
+local LocalPlayer = Players.LocalPlayer
 
--- Fixing gui
-local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
-ScreenGui.ResetOnSpawn = false
+local isBringing = false
+local targetPlayer = nil
+local bringConnection, deathConnection, charAddedConnection = nil, nil, nil
+local highlight = nil
 
-local Button = Instance.new("TextButton", ScreenGui)
-Button.Name = "BringButton"
-Button.Size = UDim2.new(0, 200, 0, 50)
-Button.Position = UDim2.new(0.5, -100, 0.1, 0)
-Button.Text = "Bring Random Player"
-Button.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
-Button.TextColor3 = Color3.new(1, 1, 1)
-Button.TextSize = 20
-Button.Draggable = true
+local espEnabled = false
+local espHighlights = {}
 
-local function getRandomOtherPlayer()
-	local otherPlayers = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-			table.insert(otherPlayers, player)
-		end
-	end
-	if #otherPlayers > 0 then
-		local randomIndex = math.random(1, #otherPlayers)
-		return otherPlayers[randomIndex]
-	else
-		return nil
-	end
+local undergrounding = false
+local undergroundConnection = nil
+local storedCFrame = nil
+local UNDERGROUND_Y = -3
+
+local triggerbotEnabled = false
+local triggerbotConnection = nil
+
+local danceTrack = nil
+local danceAnimObj = nil
+local danceAnimSpeed = 1.0
+local currentDanceId = "rbxassetid://3189776546"
+local danceEnabled = false
+
+local dances = {
+    ["Dance 1"] = "rbxassetid://507771019",
+    ["Dance 2"] = "rbxassetid://507776043",
+    ["Dance 3"] = "rbxassetid://507777268",
+    ["Robot"]   = "rbxassetid://1113752270",
+    ["Stylish"] = "rbxassetid://3189773368",
+    ["Confident"] = "rbxassetid://484140551",
+    ["Floss"] = "rbxassetid://2482632608",
+    ["Groove"] = "rbxassetid://3189771087",
+    ["Fresh"] = "rbxassetid://1181394030",
+    ["Zombify"] = "rbxassetid://1113415522",
+    ["Old Town Road"] = "rbxassetid://3189776546"
+}
+local danceNames = {}
+for name in pairs(dances) do table.insert(danceNames, name) end
+table.sort(danceNames)
+
+local function safeDisconnect(conn)
+    if conn then
+        pcall(function() conn:Disconnect() end)
+    end
 end
 
-local function bringPlayerInFront()
-	if TargetPlayer and TargetPlayer.Character and LocalPlayer.Character then
-		local targetHRP = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
-		local myHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if targetHRP and myHRP then
-			targetHRP.CFrame = myHRP.CFrame * CFrame.new(0, 0, -5) -- Adjust offset as needed
-		end
-	end
+local function disconnectBring()
+    safeDisconnect(bringConnection)
+    bringConnection = nil
+    safeDisconnect(deathConnection)
+    deathConnection = nil
+    safeDisconnect(charAddedConnection)
+    charAddedConnection = nil
+
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        targetPlayer.Character.HumanoidRootPart.Anchored = false
+    end
+    if highlight then highlight:Destroy() highlight = nil end
+    isBringing = false
+    targetPlayer = nil
 end
 
-Button.MouseButton1Click:Connect(function()
-	if not BringingActive then
-		TargetPlayer = getRandomOtherPlayer()
-		if TargetPlayer then
-			Button.Text = "Stop Bringing " .. TargetPlayer.Name
-			BringingActive = true
-			UpdateConnection = RunService.Heartbeat:Connect(bringPlayerInFront)
-		else
-			warn("No other players available to bring.")
-		end
-	else
-		if UpdateConnection then
-			UpdateConnection:Disconnect()
-			UpdateConnection = nil
-		end
-		Button.Text = "Bring Random Player"
-		BringingActive = false
-		TargetPlayer = nil
-	end
+local function bringPlayer()
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    local closest, dist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local theirRoot = p.Character.HumanoidRootPart
+            local d = (myRoot.Position - theirRoot.Position).Magnitude
+            if d < dist then
+                dist = d
+                closest = p
+            end
+        end
+    end
+
+    if not closest then return end
+    targetPlayer = closest
+
+    if not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+
+    targetPlayer.Character.HumanoidRootPart.Anchored = true
+
+    highlight = Instance.new("Highlight")
+    highlight.Name = "BringHighlight"
+    highlight.Adornee = targetPlayer.Character
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.Parent = targetPlayer.Character
+
+    local hum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        deathConnection = hum.Died:Connect(disconnectBring)
+    end
+    charAddedConnection = targetPlayer.CharacterAdded:Connect(disconnectBring)
+
+    bringConnection = RunService.RenderStepped:Connect(function()
+        if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            disconnectBring()
+            return
+        end
+
+        if myRoot then
+            targetPlayer.Character.HumanoidRootPart.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
+        end
+    end)
+
+    isBringing = true
+end
+
+local function toggleBring(val)
+    if val and not isBringing then
+        bringPlayer()
+    elseif not val and isBringing then
+        disconnectBring()
+    end
+end
+
+local function removeESP()
+    for _, h in ipairs(espHighlights) do
+        if h and h.Parent then pcall(function() h:Destroy() end) end
+    end
+    espHighlights = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            local tag = p.Character:FindFirstChild("ESPNameTag")
+            if tag then pcall(function() tag:Destroy() end) end
+        end
+    end
+end
+
+local function applyESP()
+    removeESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local h = Instance.new("Highlight")
+            h.Name = "PlayerESP"
+            h.Adornee = p.Character
+            h.FillColor = Color3.fromRGB(0, 255, 0)
+            h.FillTransparency = 0.5
+            h.OutlineColor = Color3.new(1, 1, 1)
+            h.OutlineTransparency = 0
+            h.Parent = p.Character
+            table.insert(espHighlights, h)
+
+            if not p.Character:FindFirstChild("ESPNameTag") and p.Character:FindFirstChild("Head") then
+                local billboardGui = Instance.new("BillboardGui")
+                billboardGui.Name = "ESPNameTag"
+                billboardGui.Adornee = p.Character.Head
+                billboardGui.Size = UDim2.new(0, 100, 0, 25)
+                billboardGui.StudsOffset = Vector3.new(0, 2, 0)
+                billboardGui.AlwaysOnTop = true
+                billboardGui.Parent = p.Character
+
+                local textLabel = Instance.new("TextLabel")
+                textLabel.Size = UDim2.new(1, 0, 1, 0)
+                textLabel.BackgroundTransparency = 1
+                textLabel.Text = p.Name
+                textLabel.TextColor3 = Color3.new(0, 1, 0)
+                textLabel.TextStrokeTransparency = 0
+                textLabel.Font = Enum.Font.SourceSansBold
+                textLabel.TextScaled = true
+                textLabel.Parent = billboardGui
+            end
+        end
+    end
+end
+
+local function toggleESP(val)
+    espEnabled = val
+    if val then
+        applyESP()
+    else
+        removeESP()
+    end
+end
+
+local function startUndergroundDesync()
+    if undergrounding then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    storedCFrame = root.CFrame
+    root.CFrame = CFrame.new(root.Position.X, UNDERGROUND_Y, root.Position.Z)
+    root.Anchored = false
+
+    undergroundConnection = RunService.Heartbeat:Connect(function()
+        local c = LocalPlayer.Character
+        local r = c and c:FindFirstChild("HumanoidRootPart")
+        if r and math.abs(r.Position.Y - UNDERGROUND_Y) > 2 then
+            r.CFrame = CFrame.new(r.Position.X, UNDERGROUND_Y, r.Position.Z)
+            r.Anchored = false
+        end
+    end)
+    undergrounding = true
+end
+
+local function stopUndergroundDesync()
+    if not undergrounding then return end
+    if undergroundConnection then
+        undergroundConnection:Disconnect()
+        undergroundConnection = nil
+    end
+    local character = LocalPlayer.Character
+    if character and storedCFrame then
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.CFrame = storedCFrame
+            root.Anchored = false
+        end
+    end
+    undergrounding = false
+end
+
+local function toggleUndergroundDesync(val)
+    if val then
+        startUndergroundDesync()
+    else
+        stopUndergroundDesync()
+    end
+end
+
+local function getPlayerFromPart(part)
+    if not part or not part.Parent then return nil end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and part:IsDescendantOf(p.Character) then
+            return p
+        end
+    end
+    return nil
+end
+
+local function hasForceField(character)
+    return character and character:FindFirstChildOfClass("ForceField") ~= nil
+end
+
+local function pressMouseButton()
+    pcall(function()
+        if mouse1click then
+            mouse1click()
+        elseif mouse1press and mouse1release then
+            mouse1press()
+            wait()
+            mouse1release()
+        elseif Input and Input.MouseButton1Click then
+            Input.MouseButton1Click()
+        end
+    end)
+end
+
+local function enableTriggerbot()
+    if triggerbotConnection then return end
+    local mouse = LocalPlayer:GetMouse()
+    triggerbotConnection = RunService.RenderStepped:Connect(function()
+        if not triggerbotEnabled then return end
+        local target = mouse.Target
+        local player = getPlayerFromPart(target)
+        if player and player.Character and not hasForceField(player.Character) then
+            if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                pressMouseButton()
+            end
+        end
+    end)
+end
+
+local function disableTriggerbot()
+    if triggerbotConnection then
+        triggerbotConnection:Disconnect()
+        triggerbotConnection = nil
+    end
+end
+
+local function toggleTriggerbot(val)
+    triggerbotEnabled = val
+    if val then
+        enableTriggerbot()
+    else
+        disableTriggerbot()
+    end
+end
+
+local lastCharHum
+
+local function stopDanceAnimation()
+    danceEnabled = false
+    if danceTrack then
+        local oldTrack = danceTrack
+        danceTrack = nil
+        pcall(function()
+            oldTrack:Stop()
+            oldTrack:Destroy()
+        end)
+    end
+    if danceAnimObj then
+        danceAnimObj = nil
+    end
+end
+
+local function startDanceAnimation()
+    danceEnabled = true
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    stopDanceAnimation()
+
+    danceAnimObj = Instance.new("Animation")
+    danceAnimObj.AnimationId = currentDanceId
+    local track
+    pcall(function()
+        track = hum:LoadAnimation(danceAnimObj)
+        track:Play()
+        track:AdjustSpeed(danceAnimSpeed)
+    end)
+    danceTrack = track
+end
+
+local function toggleDance(val)
+    if val then
+        startDanceAnimation()
+    else
+        stopDanceAnimation()
+    end
+end
+
+local function setDanceSpeed(speed)
+    danceAnimSpeed = speed
+    if danceTrack then
+        danceTrack:AdjustSpeed(speed)
+    end
+end
+
+local function setDance(animationId)
+    currentDanceId = animationId
+    if danceEnabled then
+        startDanceAnimation()
+    end
+end
+
+-- UI Elements Binding
+BringSection:Toggle("Bring Nearest", false, toggleBring)
+
+ESPSection:Toggle("Enable ESP", false, toggleESP)
+
+DesyncSection:Toggle("Underground Desync", false, toggleUndergroundDesync)
+
+TriggerbotSection:Toggle("Triggerbot", false, toggleTriggerbot)
+
+MiscSection:Toggle("Dance while walking", false, toggleDance)
+MiscSection:Slider("Dance Speed", 1, 0.1, 2, function(val)
+    setDanceSpeed(val)
+end)
+MiscSection:Dropdown("Select Dance", danceNames, danceNames[1], function(val)
+    setDance(dances[val])
+end)
+
+SettingsSection:Button("Unload Script", function()
+    disconnectBring()
+    removeESP()
+    stopUndergroundDesync()
+    toggleTriggerbot(false)
+    stopDanceAnimation()
+    Library:Unload()
 end)
