@@ -5,7 +5,7 @@ local TextChatService = game:GetService("TextChatService")
 local StarterGui = game:GetService("StarterGui")
 local localPlayer = Players.LocalPlayer
 
-local kingName = "dein_Dino36"
+local kingName = "Dein_Dino36"
 
 local following = false
 local followConn = nil
